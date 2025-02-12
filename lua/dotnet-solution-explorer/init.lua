@@ -6,8 +6,8 @@ local events = require("neo-tree.events")
 local utils = require("neo-tree.utils")
 local Path = require("plenary.path")
 
-local solution_file = require("solution_file")
-local project_parser = require("project_parser")
+local solution_file = require("dotnet-solution-explorer.solution_file")
+local project_parser = require("dotnet-solution-explorer.project_parser")
 local path_utils = require("utils.path")
 
 local M = {
