@@ -189,63 +189,42 @@ local function build_tree(files, base_dir)
 	return root
 end
 
--- Parsea archivos de proyecto Framework style
 local function parse_framework_style(base_dir, project_node)
 	local files = {}
 
-	-- vim.notify("Processing Framework-style project with " ..
-	--     (#(type(project_node.ItemGroup) == "table" and project_node.ItemGroup or {project_node.ItemGroup})) ..
-	--     " ItemGroups", vim.log.levels.DEBUG)
-	--
-	-- vim.notify("Type ItemGroup: " .. type(project_node.ItemGroup), vim.log.levels.DEBUG)
+	local function process_node(group, node_name, use_absolute)
+		if group[node_name] then
+			local items = type(group[node_name]) == "table" and group[node_name] or { group[node_name] }
+
+			for _, item in ipairs(items) do
+				if item._attr and item._attr.Include then
+					local path = Path:new(base_dir):joinpath(item._attr.Include)
+					if use_absolute then
+						path = path:absolute()
+					end
+
+					table.insert(files, {
+						type = "class",
+						name = vim.fn.fnamemodify(item._attr.Include, ":t"),
+						full_path = tostring(path),
+					})
+				end
+			end
+		end
+	end
 
 	if project_node.ItemGroup then
 		local groups = type(project_node.ItemGroup) == "table" and project_node.ItemGroup or { project_node.ItemGroup }
 
+		local node_configs = {
+			{ name = "Compile", use_absolute = false },
+			{ name = "None", use_absolute = true },
+			{ name = "EmbeddedResource", use_absolute = true },
+		}
+
 		for _, group in ipairs(groups) do
-			if group.Compile then
-				local compiles = type(group.Compile) == "table" and group.Compile or { group.Compile }
-
-				for _, compile in ipairs(compiles) do
-					if compile._attr and compile._attr.Include then
-						table.insert(files, {
-							type = "class",
-							name = vim.fn.fnamemodify(compile._attr.Include, ":t"),
-							full_path = tostring(Path:new(base_dir):joinpath(compile._attr.Include)),
-						})
-					end
-				end
-			end
-
-			if group.None then
-				local nones = type(group.None) == "table" and group.None or { group.None }
-
-				for _, none in ipairs(nones) do
-					if none._attr and none._attr.Include then
-						table.insert(files, {
-							type = "class",
-							name = vim.fn.fnamemodify(none._attr.Include, ":t"),
-							full_path = tostring(Path:new(base_dir):joinpath(none._attr.Include):absolute()),
-						})
-					end
-				end
-			end
-
-			if group.EmbeddedResource then
-				local embeddedResources = type(group.EmbeddedResource) == "table" and group.EmbeddedResource
-					or { group.EmbeddedResource }
-
-				for _, embeddedResource in ipairs(embeddedResources) do
-					if embeddedResource._attr and embeddedResource._attr.Include then
-						table.insert(files, {
-							type = "class",
-							name = vim.fn.fnamemodify(embeddedResource._attr.Include, ":t"),
-							full_path = tostring(
-								Path:new(base_dir):joinpath(embeddedResource._attr.Include):absolute()
-							),
-						})
-					end
-				end
+			for _, config in ipairs(node_configs) do
+				process_node(group, config.name, config.use_absolute)
 			end
 		end
 	end
