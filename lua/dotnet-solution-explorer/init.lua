@@ -29,6 +29,32 @@ local ICONS = {
 
 local SPINNER_FRAMES = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
 
+local function is_net_framework(runtime)
+       if not runtime then
+               return false
+       end
+       runtime = runtime:lower()
+       if runtime:match("^netstandard") then
+               return false
+       end
+       return runtime:match("^net[1-4]") ~= nil
+end
+
+local function is_dotnet_cli_runtime(runtime)
+       if not runtime then
+               return false
+       end
+       runtime = runtime:lower()
+       if runtime:match("^netcoreapp") or runtime:match("^netstandard") then
+               return true
+       end
+       local major = runtime:match("^net(%d)")
+       if major and tonumber(major) and tonumber(major) >= 5 then
+               return true
+       end
+       return false
+end
+
 local function debug_log(message, data)
 	-- print(string.format("[Solution Explorer Debug] %s -> %s", message, vim.inspect(data)))
 end
@@ -104,12 +130,16 @@ local function parse_project_safe(proj_path)
 		return nil
 	end
 
-	debug_log("Successfully parsed project", {
-		path = proj_path,
-		runtime = result.runtime,
-		child_count = result.children and #result.children or 0,
-	})
-	return result
+        debug_log("Successfully parsed project", {
+                path = proj_path,
+                runtime = result.runtime,
+                child_count = result.children and #result.children or 0,
+        })
+
+       if result.runtime and is_net_framework(result.runtime) and vim.fn.has("win32") ~= 1 then
+               vim.notify("Los proyectos de .NET Framework solo funcionan en Windows", vim.log.levels.ERROR)
+       end
+        return result
 end
 
 local function create_tree_node(item, project_guid, base_path, known_nodes)
@@ -184,16 +214,18 @@ local function project_to_node(state, proj, known_nodes)
 		or proj.projectType == "webProject"
 		or proj.projectType == "webDeploymentProject"
 	then
-                local project_tree = state.project_trees[proj.fullPath]
-                if not project_tree then
-                        project_tree = parse_project_safe(proj.fullPath)
-                        if project_tree then
-                                proj.kind = project_tree.kind
-                                state.project_trees[proj.fullPath] = project_tree
-                        end
-                end
+               local project_tree = state.project_trees[proj.fullPath]
+               if not project_tree then
+                       project_tree = parse_project_safe(proj.fullPath)
+                       if project_tree then
+                               proj.kind = project_tree.kind
+                               proj.runtime = project_tree.runtime
+                               state.project_trees[proj.fullPath] = project_tree
+                       end
+               end
 
-                node.kind = proj.kind
+               node.kind = proj.kind
+               node.runtime = proj.runtime
 
 		if project_tree and project_tree.children then
 			for _, item in ipairs(project_tree.children) do
@@ -615,7 +647,7 @@ local function build_project(msbuild_path, project_info)
 	build_job:start()
 end
 
-local function compile_project(msbuild_path, project_info)
+local function compile_project_msbuild(msbuild_path, project_info)
         local project_path = project_info.path
         vim.notify(string.format("Compilando %s (%s)...", project_info.name, project_info.kind:upper()))
 
@@ -643,6 +675,30 @@ local function compile_project(msbuild_path, project_info)
                 end,
         })
         build_job:start()
+end
+
+local function compile_project_dotnet(project_info)
+       local project_path = project_info.path
+       vim.notify(string.format("Compilando %s (%s)...", project_info.name, project_info.kind:upper()))
+
+       local build_job = Job:new({
+               command = "dotnet",
+               args = { "build", project_path },
+               on_stdout = function(_, data)
+                       print(data)
+               end,
+               on_stderr = function(_, data)
+                       vim.notify(data, vim.log.levels.ERROR)
+               end,
+               on_exit = function(_, code)
+                       if code == 0 then
+                               vim.notify("✓ Compilación exitosa!", vim.log.levels.INFO)
+                       else
+                               vim.notify("✗ Error en la compilación", vim.log.levels.ERROR)
+                       end
+               end,
+       })
+       build_job:start()
 end
 
 local function get_iis_express_path()
@@ -755,40 +811,55 @@ function M.build_and_run()
 end
 
 function M.build_current_project()
-        local state = require("neo-tree.sources.manager").get_state(M.name)
-        if not state or not state.tree then
-                return
-        end
-        local node = state.tree:get_node()
-        if not node or not node.path or not node.path:match("%.csproj$") then
-                vim.notify("Seleccione un proyecto válido", vim.log.levels.ERROR)
-                return
-        end
+       local state = require("neo-tree.sources.manager").get_state(M.name)
+       if not state or not state.tree then
+               return
+       end
+       local node = state.tree:get_node()
+       if not node or not node.path or not node.path:match("%.csproj$") then
+               vim.notify("Seleccione un proyecto válido", vim.log.levels.ERROR)
+               return
+       end
 
-        local project_info = {
-                path = node.path,
-                name = node.name,
-                kind = node.kind or "library",
-        }
+       local project_info = {
+               path = node.path,
+               name = node.name,
+               kind = node.kind or "library",
+               runtime = node.runtime,
+       }
 
-        local msbuild_path = find_msbuild()
-        if not msbuild_path then
-                vim.ui.select({ "Sí", "No" }, {
-                        prompt = "MSBuild no encontrado. ¿Instalar Build Tools?",
-                }, function(choice)
-                        if choice == "Sí" then
-                                install_build_tools()
-                        end
-                end)
-                return
-        end
+       if project_info.runtime and is_net_framework(project_info.runtime) then
+               if vim.fn.has("win32") ~= 1 then
+                       vim.notify("Los proyectos de .NET Framework solo funcionan en Windows", vim.log.levels.ERROR)
+                       return
+               end
 
-        compile_project(msbuild_path, project_info)
+               local msbuild_path = find_msbuild()
+               if not msbuild_path then
+                       vim.ui.select({ "Sí", "No" }, {
+                               prompt = "MSBuild no encontrado. ¿Instalar Build Tools?",
+                       }, function(choice)
+                               if choice == "Sí" then
+                                       install_build_tools()
+                               end
+                       end)
+                       return
+               end
+
+               compile_project_msbuild(msbuild_path, project_info)
+       else
+               if vim.fn.executable("dotnet") ~= 1 then
+                       vim.notify("dotnet CLI no encontrada en el PATH", vim.log.levels.ERROR)
+                       return
+               end
+               compile_project_dotnet(project_info)
+       end
 end
 
 -- Comando de usuario
 vim.api.nvim_create_user_command("DotNetFrameworkRun", M.build_and_run, {})
 vim.api.nvim_create_user_command("DotNetFrameworkBuild", M.build_current_project, {})
+vim.api.nvim_create_user_command("DotNetBuild", M.build_current_project, {})
 
 -- Autodetección de entorno al cargar el plugin
 vim.schedule(function()

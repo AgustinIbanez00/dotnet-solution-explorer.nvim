@@ -6,7 +6,7 @@ Support to Solution Explorer for NeoVim
 When the cursor is on a project node you can compile it using the command:
 
 ```
-:DotNetFrameworkBuild
+:DotNetBuild
 ```
 
 It is also possible to map a key inside the Neo-tree window. Example:
