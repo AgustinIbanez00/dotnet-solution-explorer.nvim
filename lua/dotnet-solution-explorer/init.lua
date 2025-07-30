@@ -130,7 +130,7 @@ local function parse_project_safe(proj_path)
 		return nil
 	end
 
-        debug_log("Successfully parsed project", {
+       debug_log("Successfully parsed project", {
                 path = proj_path,
                 runtime = result.runtime,
                 child_count = result.children and #result.children or 0,
@@ -220,12 +220,14 @@ local function project_to_node(state, proj, known_nodes)
                        if project_tree then
                                proj.kind = project_tree.kind
                                proj.runtime = project_tree.runtime
+                               proj.is_sdk_style = project_tree.is_sdk_style
                                state.project_trees[proj.fullPath] = project_tree
                        end
                end
 
                node.kind = proj.kind
                node.runtime = proj.runtime
+               node.is_sdk_style = proj.is_sdk_style
                if proj.runtime then
                        node.name = string.format("%s (%s)", proj.projectName, proj.runtime)
                end
@@ -444,6 +446,25 @@ local function find_solution(path)
 		current = vim.fn.fnamemodify(current, ":h")
 	end
 	return nil
+end
+
+local function find_project_for_path(state, file_path)
+       if not state.parsed_solution then
+               return nil
+       end
+
+       file_path = path_utils.normalize_path(file_path)
+
+       for _, proj in ipairs(state.parsed_solution:projects()) do
+               if proj.projectType ~= "solutionFolder" then
+                       local proj_dir = Path:new(proj.fullPath):parent():absolute()
+                       if file_path:sub(1, #proj_dir) == proj_dir then
+                               return proj
+                       end
+               end
+       end
+
+       return nil
 end
 
 local function projects_picker(state)
@@ -709,6 +730,34 @@ local function run_project_dotnet(project_info)
        vim.fn.termopen(cmd)
 end
 
+local function add_file_to_csproj(csproj_path, rel_path)
+       local lines = vim.fn.readfile(csproj_path)
+       local insert_pos = nil
+       for idx, line in ipairs(lines) do
+               if line:match("</ItemGroup>") then
+                       insert_pos = idx
+                       break
+               end
+       end
+
+       local compile_line = string.format('    <Compile Include="%s" />', rel_path)
+
+       if insert_pos then
+               table.insert(lines, insert_pos, compile_line)
+       else
+               table.insert(lines, #lines, '  <ItemGroup>')
+               table.insert(lines, #lines, compile_line)
+               table.insert(lines, #lines, '  </ItemGroup>')
+       end
+
+       vim.fn.writefile(lines, csproj_path)
+end
+
+local function create_file(full_path, template)
+       Path:new(full_path):write(template or "", "w")
+end
+
+
 local function get_iis_express_path()
 	local program_files = os.getenv("ProgramFiles(x86)") or os.getenv("ProgramFiles")
 	local paths = {
@@ -896,11 +945,66 @@ function M.run_current_project()
        run_project_dotnet(project_info)
 end
 
+function M.create_new_file()
+       local state = require("neo-tree.sources.manager").get_state(M.name)
+       if not state or not state.tree then
+               return
+       end
+
+       local node = state.tree:get_node()
+       if not node then
+               return
+       end
+
+       local dir_path = node.path
+       if node.type ~= "directory" then
+               dir_path = Path:new(node.path):parent():absolute()
+       elseif dir_path:match("%.csproj$") then
+               dir_path = Path:new(dir_path):parent():absolute()
+       end
+
+       vim.ui.input({ prompt = "Nombre del archivo:" }, function(input)
+               if not input or input == "" then
+                       return
+               end
+
+               local full_path = Path:new(dir_path, input):absolute()
+               if vim.fn.filereadable(full_path) == 1 then
+                       vim.notify("El archivo ya existe", vim.log.levels.ERROR)
+                       return
+               end
+
+               local template = ""
+               if input:match("%.cs$") then
+                       local class_name = input:gsub("%.cs$", "")
+                       template = string.format("public class %s\n{\n}\n", class_name)
+               end
+
+               create_file(full_path, template)
+
+               local proj = find_project_for_path(state, full_path)
+               if proj then
+                       local proj_tree = state.project_trees[proj.fullPath]
+                       if proj_tree and not proj_tree.is_sdk_style then
+                               local proj_dir = Path:new(proj.fullPath):parent():absolute()
+                               local rel = Path:new(full_path):make_relative(proj_dir)
+                               add_file_to_csproj(proj.fullPath, rel)
+                       end
+               end
+
+               state.last_scan = 0
+               manager.refresh(M.name)
+
+               vim.cmd("edit " .. full_path)
+       end)
+end
+
 -- Comando de usuario
 vim.api.nvim_create_user_command("DotNetFrameworkRun", M.build_and_run, {})
 vim.api.nvim_create_user_command("DotNetFrameworkBuild", M.build_current_project, {})
 vim.api.nvim_create_user_command("DotNetBuild", M.build_current_project, {})
 vim.api.nvim_create_user_command("DotNetRun", M.run_current_project, {})
+vim.api.nvim_create_user_command("DotNetAddFile", M.create_new_file, {})
 
 -- Autodetección de entorno al cargar el plugin
 vim.schedule(function()

@@ -317,11 +317,12 @@ function M.parse_project(proj_path)
 
 	local tree = build_tree(files, base_dir)
 
-	return {
-		runtime = project_info.runtime,
-		kind = detect_project_kind(project_node),
-		children = tree.children,
-	}
+        return {
+                runtime = project_info.runtime,
+                kind = detect_project_kind(project_node),
+                children = tree.children,
+                is_sdk_style = project_info.is_sdk_style,
+        }
 end
 
 return M

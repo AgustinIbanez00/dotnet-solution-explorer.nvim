@@ -27,5 +27,9 @@ M.run_project = function(state)
         require("dotnet-solution-explorer").run_current_project()
 end
 
+M.add_file = function(state)
+        require("dotnet-solution-explorer").create_new_file()
+end
+
 cc._add_common_commands(M)
 return M

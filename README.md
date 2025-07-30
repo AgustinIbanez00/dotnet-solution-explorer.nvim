@@ -42,3 +42,24 @@ require("neo-tree").setup({
     },
 })
 ```
+
+## Create files
+
+Inside a project folder you can create a new file with:
+
+```
+:DotNetAddFile
+```
+
+Mapping the `a` key in Neo-tree:
+
+```lua
+require("neo-tree").setup({
+    sources = { "filesystem", "buffers", "git_status", "document_symbols", "dotnet_solution" },
+    window = {
+        mappings = {
+            ["a"] = "add_file",
+        },
+    },
+})
+```
