@@ -21,3 +21,24 @@ require("neo-tree").setup({
     },
 })
 ```
+
+## Run current project
+
+When a .NET project is selected you can execute it with:
+
+```
+:DotNetRun
+```
+
+Example key mapping inside Neo-tree:
+
+```lua
+require("neo-tree").setup({
+    sources = { "filesystem", "buffers", "git_status", "document_symbols", "dotnet_solution" },
+    window = {
+        mappings = {
+            ["R"] = "run_project",
+        },
+    },
+})
+```

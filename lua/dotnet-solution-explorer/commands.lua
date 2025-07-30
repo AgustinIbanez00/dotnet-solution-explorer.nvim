@@ -23,5 +23,9 @@ M.build_project = function(state)
         require("dotnet-solution-explorer").build_current_project()
 end
 
+M.run_project = function(state)
+        require("dotnet-solution-explorer").run_current_project()
+end
+
 cc._add_common_commands(M)
 return M

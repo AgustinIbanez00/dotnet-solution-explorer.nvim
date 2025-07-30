@@ -199,15 +199,15 @@ local function project_to_node(state, proj, known_nodes)
 	end
 	known_nodes[proj.fullPath] = true
 
-        local node = {
-                id = proj.fullPath,
-                name = proj.projectName,
-                path = proj.fullPath,
-                type = "directory",
-                icon = (proj.projectType == "solutionFolder") and ICONS.FOLDER or ICONS.PROJECT,
-                children = {},
-                kind = proj.kind,
-        }
+       local node = {
+               id = proj.fullPath,
+               name = proj.projectName,
+               path = proj.fullPath,
+               type = "directory",
+               icon = (proj.projectType == "solutionFolder") and ICONS.FOLDER or ICONS.PROJECT,
+               children = {},
+               kind = proj.kind,
+       }
 
 	if
 		proj.projectType == "knownToBeMSBuildFormat"
@@ -226,6 +226,9 @@ local function project_to_node(state, proj, known_nodes)
 
                node.kind = proj.kind
                node.runtime = proj.runtime
+               if proj.runtime then
+                       node.name = string.format("%s (%s)", proj.projectName, proj.runtime)
+               end
 
 		if project_tree and project_tree.children then
 			for _, item in ipairs(project_tree.children) do
@@ -701,6 +704,11 @@ local function compile_project_dotnet(project_info)
        build_job:start()
 end
 
+local function run_project_dotnet(project_info)
+       local cmd = { "dotnet", "run", "--project", project_info.path }
+       vim.fn.termopen(cmd)
+end
+
 local function get_iis_express_path()
 	local program_files = os.getenv("ProgramFiles(x86)") or os.getenv("ProgramFiles")
 	local paths = {
@@ -856,10 +864,43 @@ function M.build_current_project()
        end
 end
 
+function M.run_current_project()
+       local state = require("neo-tree.sources.manager").get_state(M.name)
+       if not state or not state.tree then
+               return
+       end
+
+       local node = state.tree:get_node()
+       if not node or not node.path or not node.path:match("%.csproj$") then
+               vim.notify("Seleccione un proyecto válido", vim.log.levels.ERROR)
+               return
+       end
+
+       local project_info = {
+               path = node.path,
+               name = node.name,
+               kind = node.kind or "console",
+               runtime = node.runtime,
+       }
+
+       if not is_dotnet_cli_runtime(project_info.runtime) then
+               vim.notify("DotNetRun solo soporta proyectos .NET", vim.log.levels.ERROR)
+               return
+       end
+
+       if vim.fn.executable("dotnet") ~= 1 then
+               vim.notify("dotnet CLI no encontrada en el PATH", vim.log.levels.ERROR)
+               return
+       end
+
+       run_project_dotnet(project_info)
+end
+
 -- Comando de usuario
 vim.api.nvim_create_user_command("DotNetFrameworkRun", M.build_and_run, {})
 vim.api.nvim_create_user_command("DotNetFrameworkBuild", M.build_current_project, {})
 vim.api.nvim_create_user_command("DotNetBuild", M.build_current_project, {})
+vim.api.nvim_create_user_command("DotNetRun", M.run_current_project, {})
 
 -- Autodetección de entorno al cargar el plugin
 vim.schedule(function()
