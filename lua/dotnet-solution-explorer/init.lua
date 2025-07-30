@@ -169,28 +169,31 @@ local function project_to_node(state, proj, known_nodes)
 	end
 	known_nodes[proj.fullPath] = true
 
-	local node = {
-		id = proj.fullPath,
-		name = proj.projectName,
-		path = proj.fullPath,
-		type = "directory",
-		icon = (proj.projectType == "solutionFolder") and ICONS.FOLDER or ICONS.PROJECT,
-		children = {},
-	}
+        local node = {
+                id = proj.fullPath,
+                name = proj.projectName,
+                path = proj.fullPath,
+                type = "directory",
+                icon = (proj.projectType == "solutionFolder") and ICONS.FOLDER or ICONS.PROJECT,
+                children = {},
+                kind = proj.kind,
+        }
 
 	if
 		proj.projectType == "knownToBeMSBuildFormat"
 		or proj.projectType == "webProject"
 		or proj.projectType == "webDeploymentProject"
 	then
-		local project_tree = state.project_trees[proj.fullPath]
-		if not project_tree then
-			project_tree = parse_project_safe(proj.fullPath)
-			if project_tree then
-				proj.kind = project_tree.kind
-				state.project_trees[proj.fullPath] = project_tree
-			end
-		end
+                local project_tree = state.project_trees[proj.fullPath]
+                if not project_tree then
+                        project_tree = parse_project_safe(proj.fullPath)
+                        if project_tree then
+                                proj.kind = project_tree.kind
+                                state.project_trees[proj.fullPath] = project_tree
+                        end
+                end
+
+                node.kind = proj.kind
 
 		if project_tree and project_tree.children then
 			for _, item in ipairs(project_tree.children) do
@@ -612,6 +615,36 @@ local function build_project(msbuild_path, project_info)
 	build_job:start()
 end
 
+local function compile_project(msbuild_path, project_info)
+        local project_path = project_info.path
+        vim.notify(string.format("Compilando %s (%s)...", project_info.name, project_info.kind:upper()))
+
+        local build_job = Job:new({
+                command = msbuild_path,
+                args = {
+                        project_path,
+                        "/t:Rebuild",
+                        "/p:Configuration=Debug",
+                        "/p:Platform=AnyCPU",
+                        "/v:minimal",
+                },
+                on_stdout = function(_, data)
+                        print(data)
+                end,
+                on_stderr = function(_, data)
+                        vim.notify(data, vim.log.levels.ERROR)
+                end,
+                on_exit = function(_, code)
+                        if code == 0 then
+                                vim.notify("✓ Compilación exitosa!", vim.log.levels.INFO)
+                        else
+                                vim.notify("✗ Error en la compilación", vim.log.levels.ERROR)
+                        end
+                end,
+        })
+        build_job:start()
+end
+
 local function get_iis_express_path()
 	local program_files = os.getenv("ProgramFiles(x86)") or os.getenv("ProgramFiles")
 	local paths = {
@@ -721,8 +754,41 @@ function M.build_and_run()
 	build_project(msbuild_path, project_info) -- Pasamos el objeto completo
 end
 
+function M.build_current_project()
+        local state = require("neo-tree.sources.manager").get_state(M.name)
+        if not state or not state.tree then
+                return
+        end
+        local node = state.tree:get_node()
+        if not node or not node.path or not node.path:match("%.csproj$") then
+                vim.notify("Seleccione un proyecto válido", vim.log.levels.ERROR)
+                return
+        end
+
+        local project_info = {
+                path = node.path,
+                name = node.name,
+                kind = node.kind or "library",
+        }
+
+        local msbuild_path = find_msbuild()
+        if not msbuild_path then
+                vim.ui.select({ "Sí", "No" }, {
+                        prompt = "MSBuild no encontrado. ¿Instalar Build Tools?",
+                }, function(choice)
+                        if choice == "Sí" then
+                                install_build_tools()
+                        end
+                end)
+                return
+        end
+
+        compile_project(msbuild_path, project_info)
+end
+
 -- Comando de usuario
 vim.api.nvim_create_user_command("DotNetFrameworkRun", M.build_and_run, {})
+vim.api.nvim_create_user_command("DotNetFrameworkBuild", M.build_current_project, {})
 
 -- Autodetección de entorno al cargar el plugin
 vim.schedule(function()
