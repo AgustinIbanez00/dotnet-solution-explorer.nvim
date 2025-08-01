@@ -33,7 +33,7 @@ A Neo-tree source that brings a Visual Studio style Solution Explorer to Neovim.
 }
 ```
 
-Add `"dotnet_solution"` to the `sources` list of Neo-tree:
+The source registers itself with Neo-tree. To control ordering you may still list it:
 
 ```lua
 require("neo-tree").setup({
@@ -59,7 +59,8 @@ use {
 - `:DotNetRun` – run the selected project using `dotnet run` or the built executable
 - `:DotNetAddFile` – create a new file inside the current folder and update the project
 
-You can map these inside the Neo-tree window. For example:
+You can map these inside the Neo-tree window. The source registers itself
+automatically, but this snippet shows how to include it explicitly:
 
 ```lua
 require("neo-tree").setup({
