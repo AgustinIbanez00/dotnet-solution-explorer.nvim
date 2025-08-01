@@ -23,7 +23,7 @@ A Neo-tree source that brings a Visual Studio style Solution Explorer to Neovim.
 
 ```lua
 {
-  "your-user/dotnet-solution-explorer.nvim",
+  "AgustinIbanez00/dotnet-solution-explorer.nvim",
   dependencies = { "nvim-neo-tree/neo-tree.nvim", "nvim-lua/plenary.nvim" },
   config = function()
     require("dotnet-solution-explorer").setup({
