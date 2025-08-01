@@ -55,8 +55,13 @@ local function is_dotnet_cli_runtime(runtime)
 	return false
 end
 
+local debug_enabled = false
+
 local function debug_log(message, data)
-	-- print(string.format("[Solution Explorer Debug] %s -> %s", message, vim.inspect(data)))
+        if not debug_enabled then
+                return
+        end
+        print(string.format("[Solution Explorer Debug] %s -> %s", message, vim.inspect(data)))
 end
 
 local function find_and_parse_solution(state, sln_file_path)
@@ -1035,7 +1040,10 @@ vim.schedule(function()
 end)
 
 M.setup = function(config, global_config)
-	utils.register_stat_provider("solution-explorer", M.get_node_stat)
+        config = config or {}
+        debug_enabled = config.debug or false
+
+        utils.register_stat_provider("solution-explorer", M.get_node_stat)
 
 	manager.subscribe(M.name, {
 		event = events.FS_EVENT,
