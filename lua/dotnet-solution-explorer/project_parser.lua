@@ -1,6 +1,9 @@
 local uv = vim.loop
 local Path = require("plenary.path")
-local xml2lua = require("xml2lua")
+local ok_xml2lua, xml2lua = pcall(require, "xml2lua")
+if not ok_xml2lua then
+       xml2lua = nil
+end
 local path_utils = require("utils.path")
 
 local M = {}
@@ -292,8 +295,13 @@ local function detect_project_kind(project_node)
 end
 
 function M.parse_project(proj_path)
-	local handler = require("xmlhandler.tree")
-	proj_path = path_utils.normalize_path(proj_path)
+       if not xml2lua then
+               vim.notify("Falta la dependencia xml2lua. Instálala con 'luarocks install xml2lua'", vim.log.levels.ERROR)
+               return nil, "xml2lua missing"
+       end
+
+       local handler = require("xmlhandler.tree")
+       proj_path = path_utils.normalize_path(proj_path)
 
 	local csproj_handler = handler:new()
 	local csproj_parser = xml2lua.parser(csproj_handler)
@@ -317,11 +325,12 @@ function M.parse_project(proj_path)
 
 	local tree = build_tree(files, base_dir)
 
-	return {
-		runtime = project_info.runtime,
-		kind = detect_project_kind(project_node),
-		children = tree.children,
-	}
+        return {
+                runtime = project_info.runtime,
+                kind = detect_project_kind(project_node),
+                children = tree.children,
+                is_sdk_style = project_info.is_sdk_style,
+        }
 end
 
 return M

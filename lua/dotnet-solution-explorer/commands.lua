@@ -14,9 +14,21 @@ M.show_debug_info = function(state)
 end
 
 M.set_default_project = function(state)
-	local tree = state.tree
-	local node = tree:get_node()
-	local id = node:get_id()
+        local tree = state.tree
+        local node = tree:get_node()
+        local id = node:get_id()
+end
+
+M.build_project = function(state)
+        require("dotnet-solution-explorer").build_current_project()
+end
+
+M.run_project = function(state)
+        require("dotnet-solution-explorer").run_current_project()
+end
+
+M.add_file = function(state)
+        require("dotnet-solution-explorer").create_new_file()
 end
 
 cc._add_common_commands(M)
