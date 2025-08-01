@@ -8,7 +8,7 @@ local Path = require("plenary.path")
 
 local solution_file = require("dotnet-solution-explorer.solution_file")
 local project_parser = require("dotnet-solution-explorer.project_parser")
-local path_utils = require("utils.path")
+local path_utils = require("dotnet-solution-explorer.utils.path")
 
 local M = {
 	name = "dotnet_solution",
@@ -28,6 +28,32 @@ local ICONS = {
 }
 
 local SPINNER_FRAMES = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+
+local function is_net_framework(runtime)
+	if not runtime then
+		return false
+	end
+	runtime = runtime:lower()
+	if runtime:match("^netstandard") then
+		return false
+	end
+	return runtime:match("^net[1-4]") ~= nil
+end
+
+local function is_dotnet_cli_runtime(runtime)
+	if not runtime then
+		return false
+	end
+	runtime = runtime:lower()
+	if runtime:match("^netcoreapp") or runtime:match("^netstandard") then
+		return true
+	end
+	local major = runtime:match("^net(%d)")
+	if major and tonumber(major) and tonumber(major) >= 5 then
+		return true
+	end
+	return false
+end
 
 local function debug_log(message, data)
 	-- print(string.format("[Solution Explorer Debug] %s -> %s", message, vim.inspect(data)))
@@ -109,6 +135,10 @@ local function parse_project_safe(proj_path)
 		runtime = result.runtime,
 		child_count = result.children and #result.children or 0,
 	})
+
+	if result.runtime and is_net_framework(result.runtime) and vim.fn.has("win32") ~= 1 then
+		vim.notify("Los proyectos de .NET Framework solo funcionan en Windows", vim.log.levels.ERROR)
+	end
 	return result
 end
 
@@ -176,6 +206,7 @@ local function project_to_node(state, proj, known_nodes)
 		type = "directory",
 		icon = (proj.projectType == "solutionFolder") and ICONS.FOLDER or ICONS.PROJECT,
 		children = {},
+		kind = proj.kind,
 	}
 
 	if
@@ -188,8 +219,17 @@ local function project_to_node(state, proj, known_nodes)
 			project_tree = parse_project_safe(proj.fullPath)
 			if project_tree then
 				proj.kind = project_tree.kind
+				proj.runtime = project_tree.runtime
+				proj.is_sdk_style = project_tree.is_sdk_style
 				state.project_trees[proj.fullPath] = project_tree
 			end
+		end
+
+		node.kind = proj.kind
+		node.runtime = proj.runtime
+		node.is_sdk_style = proj.is_sdk_style
+		if proj.runtime then
+			node.name = string.format("%s (%s)", proj.projectName, proj.runtime)
 		end
 
 		if project_tree and project_tree.children then
@@ -408,6 +448,25 @@ local function find_solution(path)
 	return nil
 end
 
+local function find_project_for_path(state, file_path)
+	if not state.parsed_solution then
+		return nil
+	end
+
+	file_path = path_utils.normalize_path(file_path)
+
+	for _, proj in ipairs(state.parsed_solution:projects()) do
+		if proj.projectType ~= "solutionFolder" then
+			local proj_dir = Path:new(proj.fullPath):parent():absolute()
+			if file_path:sub(1, #proj_dir) == proj_dir then
+				return proj
+			end
+		end
+	end
+
+	return nil
+end
+
 local function projects_picker(state)
 	local actions = require("telescope.actions")
 	local action_state = require("telescope.actions.state")
@@ -612,6 +671,92 @@ local function build_project(msbuild_path, project_info)
 	build_job:start()
 end
 
+local function compile_project_msbuild(msbuild_path, project_info)
+	local project_path = project_info.path
+	vim.notify(string.format("Compilando %s (%s)...", project_info.name, project_info.kind:upper()))
+
+	local build_job = Job:new({
+		command = msbuild_path,
+		args = {
+			project_path,
+			"/t:Rebuild",
+			"/p:Configuration=Debug",
+			"/p:Platform=AnyCPU",
+			"/v:minimal",
+		},
+		on_stdout = function(_, data)
+			print(data)
+		end,
+		on_stderr = function(_, data)
+			vim.notify(data, vim.log.levels.ERROR)
+		end,
+		on_exit = function(_, code)
+			if code == 0 then
+				vim.notify("✓ Compilación exitosa!", vim.log.levels.INFO)
+			else
+				vim.notify("✗ Error en la compilación", vim.log.levels.ERROR)
+			end
+		end,
+	})
+	build_job:start()
+end
+
+local function compile_project_dotnet(project_info)
+	local project_path = project_info.path
+	vim.notify(string.format("Compilando %s (%s)...", project_info.name, project_info.kind:upper()))
+
+	local build_job = Job:new({
+		command = "dotnet",
+		args = { "build", project_path },
+		on_stdout = function(_, data)
+			print(data)
+		end,
+		on_stderr = function(_, data)
+			vim.notify(data, vim.log.levels.ERROR)
+		end,
+		on_exit = function(_, code)
+			if code == 0 then
+				vim.notify("✓ Compilación exitosa!", vim.log.levels.INFO)
+			else
+				vim.notify("✗ Error en la compilación", vim.log.levels.ERROR)
+			end
+		end,
+	})
+	build_job:start()
+end
+
+local function run_project_dotnet(project_info)
+	local cmd = { "dotnet", "run", "--project", project_info.path }
+	vim.fn.termopen(cmd)
+end
+
+local function add_file_to_csproj(csproj_path, rel_path)
+	local lines = vim.fn.readfile(csproj_path)
+	local insert_pos = nil
+	for idx, line in ipairs(lines) do
+		if line:match("</ItemGroup>") then
+			insert_pos = idx
+			break
+		end
+	end
+
+	local compile_line = string.format('    <Compile Include="%s" />', rel_path)
+
+	if insert_pos then
+		table.insert(lines, insert_pos, compile_line)
+	else
+		table.insert(lines, #lines, "  <ItemGroup>")
+		table.insert(lines, #lines, compile_line)
+		table.insert(lines, #lines, "  </ItemGroup>")
+	end
+
+	vim.fn.writefile(lines, csproj_path)
+end
+
+local function create_file(full_path, template)
+	Path:new(full_path):write(template or "", "w")
+end
+
 local function get_iis_express_path()
 	local program_files = os.getenv("ProgramFiles(x86)") or os.getenv("ProgramFiles")
 	local paths = {
@@ -721,17 +866,172 @@ function M.build_and_run()
 	build_project(msbuild_path, project_info) -- Pasamos el objeto completo
 end
 
+function M.build_current_project()
+	local state = require("neo-tree.sources.manager").get_state(M.name)
+	if not state or not state.tree then
+		return
+	end
+	local node = state.tree:get_node()
+	if not node or not node.path or not node.path:match("%.csproj$") then
+		vim.notify("Seleccione un proyecto válido", vim.log.levels.ERROR)
+		return
+	end
+
+	local project_info = {
+		path = node.path,
+		name = node.name,
+		kind = node.kind or "library",
+		runtime = node.runtime,
+	}
+
+	if project_info.runtime and is_net_framework(project_info.runtime) then
+		if vim.fn.has("win32") ~= 1 then
+			vim.notify("Los proyectos de .NET Framework solo funcionan en Windows", vim.log.levels.ERROR)
+			return
+		end
+
+		local msbuild_path = find_msbuild()
+		if not msbuild_path then
+			vim.ui.select({ "Sí", "No" }, {
+				prompt = "MSBuild no encontrado. ¿Instalar Build Tools?",
+			}, function(choice)
+				if choice == "Sí" then
+					install_build_tools()
+				end
+			end)
+			return
+		end
+
+		compile_project_msbuild(msbuild_path, project_info)
+	else
+		if vim.fn.executable("dotnet") ~= 1 then
+			vim.notify("dotnet CLI no encontrada en el PATH", vim.log.levels.ERROR)
+			return
+		end
+		compile_project_dotnet(project_info)
+	end
+end
+
+function M.run_current_project()
+	local state = require("neo-tree.sources.manager").get_state(M.name)
+	if not state or not state.tree then
+		return
+	end
+
+	local node = state.tree:get_node()
+	if not node or not node.path or not node.path:match("%.csproj$") then
+		vim.notify("Seleccione un proyecto válido", vim.log.levels.ERROR)
+		return
+	end
+
+	local project_info = {
+		path = node.path,
+		name = node.name,
+		kind = node.kind or "console",
+		runtime = node.runtime,
+	}
+
+	if not is_dotnet_cli_runtime(project_info.runtime) then
+		vim.notify("DotNetRun solo soporta proyectos .NET", vim.log.levels.ERROR)
+		return
+	end
+
+	if vim.fn.executable("dotnet") ~= 1 then
+		vim.notify("dotnet CLI no encontrada en el PATH", vim.log.levels.ERROR)
+		return
+	end
+
+	run_project_dotnet(project_info)
+end
+
+function M.create_new_file()
+	local state = require("neo-tree.sources.manager").get_state(M.name)
+	if not state or not state.tree then
+		return
+	end
+
+	local node = state.tree:get_node()
+	if not node then
+		return
+	end
+
+	local dir_path = node.path
+	if node.type ~= "directory" then
+		dir_path = Path:new(node.path):parent():absolute()
+	elseif dir_path:match("%.csproj$") then
+		dir_path = Path:new(dir_path):parent():absolute()
+	end
+
+	vim.ui.input({ prompt = "Nombre del archivo:" }, function(input)
+		if not input or input == "" then
+			return
+		end
+
+		local full_path = Path:new(dir_path, input):absolute()
+		if vim.fn.filereadable(full_path) == 1 then
+			vim.notify("El archivo ya existe", vim.log.levels.ERROR)
+			return
+		end
+
+		local template = ""
+		if input:match("%.cs$") then
+			local class_name = input:gsub("%.cs$", "")
+			template = string.format("public class %s\n{\n}\n", class_name)
+		end
+
+		create_file(full_path, template)
+
+		local proj = find_project_for_path(state, full_path)
+		if proj then
+			local proj_tree = state.project_trees[proj.fullPath]
+			if proj_tree and not proj_tree.is_sdk_style then
+				local proj_dir = Path:new(proj.fullPath):parent():absolute()
+				local rel = Path:new(full_path):make_relative(proj_dir)
+				add_file_to_csproj(proj.fullPath, rel)
+			end
+		end
+
+		state.last_scan = 0
+		manager.refresh(M.name)
+
+		vim.cmd("edit " .. full_path)
+	end)
+end
+
 -- Comando de usuario
 vim.api.nvim_create_user_command("DotNetFrameworkRun", M.build_and_run, {})
+vim.api.nvim_create_user_command("DotNetFrameworkBuild", M.build_current_project, {})
+vim.api.nvim_create_user_command("DotNetBuild", M.build_current_project, {})
+vim.api.nvim_create_user_command("DotNetRun", M.run_current_project, {})
+vim.api.nvim_create_user_command("DotNetAddFile", M.create_new_file, {})
 
 -- Autodetección de entorno al cargar el plugin
 vim.schedule(function()
-	if vim.fn.has("win32") == 1 then
-		local msbuild = find_msbuild()
-		if not msbuild then
-			vim.notify("Requerido: Visual Studio Build Tools para proyectos .NET Framework", vim.log.levels.WARN)
-		end
-	end
+       local ok = pcall(require, "xml2lua")
+       if not ok then
+               if vim.fn.executable("luarocks") == 1 then
+                       vim.notify("Instalando dependencia xml2lua...", vim.log.levels.INFO)
+                       Job:new({
+                               command = "luarocks",
+                               args = { "install", "xml2lua" },
+                               on_exit = function(_, code)
+                                       if code == 0 then
+                                               vim.notify("xml2lua instalado correctamente", vim.log.levels.INFO)
+                                       else
+                                               vim.notify("No se pudo instalar xml2lua. Instálalo manualmente con 'luarocks install xml2lua'", vim.log.levels.ERROR)
+                                       end
+                               end,
+                       }):start()
+               else
+                       vim.notify("Dependencia faltante: xml2lua. Instálala con 'luarocks install xml2lua'", vim.log.levels.ERROR)
+               end
+       end
+       if vim.fn.has("win32") == 1 then
+               local msbuild = find_msbuild()
+               if not msbuild then
+                       vim.notify("Requerido: Visual Studio Build Tools para proyectos .NET Framework", vim.log.levels.WARN)
+               end
+        end
 end)
 
 M.setup = function(config, global_config)
