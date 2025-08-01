@@ -58,10 +58,10 @@ end
 local debug_enabled = false
 
 local function debug_log(message, data)
-        if not debug_enabled then
-                return
-        end
-        print(string.format("[Solution Explorer Debug] %s -> %s", message, vim.inspect(data)))
+	if not debug_enabled then
+		return
+	end
+	print(string.format("[Solution Explorer Debug] %s -> %s", message, vim.inspect(data)))
 end
 
 local function find_and_parse_solution(state, sln_file_path)
@@ -1012,38 +1012,41 @@ vim.api.nvim_create_user_command("DotNetAddFile", M.create_new_file, {})
 
 -- Autodetección de entorno al cargar el plugin
 vim.schedule(function()
-       local ok = pcall(require, "xml2lua")
-       if not ok then
-               if vim.fn.executable("luarocks") == 1 then
-                       vim.notify("Instalando dependencia xml2lua...", vim.log.levels.INFO)
-                       Job:new({
-                               command = "luarocks",
-                               args = { "install", "xml2lua" },
-                               on_exit = function(_, code)
-                                       if code == 0 then
-                                               vim.notify("xml2lua instalado correctamente", vim.log.levels.INFO)
-                                       else
-                                               vim.notify("No se pudo instalar xml2lua. Instálalo manualmente con 'luarocks install xml2lua'", vim.log.levels.ERROR)
-                                       end
-                               end,
-                       }):start()
-               else
-                       vim.notify("Dependencia faltante: xml2lua. Instálala con 'luarocks install xml2lua'", vim.log.levels.ERROR)
-               end
-       end
-       if vim.fn.has("win32") == 1 then
-               local msbuild = find_msbuild()
-               if not msbuild then
-                       vim.notify("Requerido: Visual Studio Build Tools para proyectos .NET Framework", vim.log.levels.WARN)
-               end
-        end
+	local ok = pcall(require, "xml2lua")
+	if not ok then
+		if vim.fn.executable("luarocks") == 1 then
+			vim.notify("Instalando dependencia xml2lua...", vim.log.levels.INFO)
+			Job:new({
+				command = "luarocks",
+				args = { "install", "xml2lua" },
+				on_exit = function(_, code)
+					if code == 0 then
+						vim.notify("xml2lua instalado correctamente", vim.log.levels.INFO)
+					else
+						vim.notify(
+							"No se pudo instalar xml2lua. Instálalo manualmente con 'luarocks install xml2lua'",
+							vim.log.levels.ERROR
+						)
+					end
+				end,
+			}):start()
+		else
+			vim.notify("Dependencia faltante: xml2lua. Instálala con 'luarocks install xml2lua'", vim.log.levels.ERROR)
+		end
+	end
+	if vim.fn.has("win32") == 1 then
+		local msbuild = find_msbuild()
+		if not msbuild then
+			vim.notify("Requerido: Visual Studio Build Tools para proyectos .NET Framework", vim.log.levels.WARN)
+		end
+	end
 end)
 
 M.setup = function(config, global_config)
-        config = config or {}
-        debug_enabled = config.debug or false
+	config = config or { follow_current_file = { enabled = false } }
+	debug_enabled = config.debug or false
 
-        utils.register_stat_provider("solution-explorer", M.get_node_stat)
+	utils.register_stat_provider("solution-explorer", M.get_node_stat)
 
 	manager.subscribe(M.name, {
 		event = events.FS_EVENT,
