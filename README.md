@@ -27,6 +27,8 @@ A Neo-tree source that brings a Visual Studio style Solution Explorer to Neovim.
   dependencies = { "nvim-neo-tree/neo-tree.nvim", "nvim-lua/plenary.nvim" },
   config = function()
     require("dotnet-solution-explorer").setup({
+      -- Set to true to enable verbose debug output
+      debug = false,
       follow_current_file = { enabled = true },
     })
   end,
@@ -72,6 +74,17 @@ require("neo-tree").setup({
       ["a"] = "add_file",
     },
   },
+})
+```
+
+## Debugging
+
+Set `debug = true` in the setup call to print verbose messages while the source
+is loading and parsing projects:
+
+```lua
+require("dotnet-solution-explorer").setup({
+  debug = true,
 })
 ```
 
