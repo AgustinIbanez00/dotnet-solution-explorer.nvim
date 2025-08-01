@@ -4,7 +4,7 @@ local ok_xml2lua, xml2lua = pcall(require, "xml2lua")
 if not ok_xml2lua then
        xml2lua = nil
 end
-local path_utils = require("utils.path")
+local path_utils = require("dotnet-solution-explorer.utils.path")
 
 local M = {}
 
@@ -325,12 +325,12 @@ function M.parse_project(proj_path)
 
 	local tree = build_tree(files, base_dir)
 
-        return {
-                runtime = project_info.runtime,
-                kind = detect_project_kind(project_node),
-                children = tree.children,
-                is_sdk_style = project_info.is_sdk_style,
-        }
+	return {
+		runtime = project_info.runtime,
+		kind = detect_project_kind(project_node),
+		children = tree.children,
+		is_sdk_style = project_info.is_sdk_style,
+	}
 end
 
 return M
